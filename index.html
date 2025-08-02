@@ -1,0 +1,219 @@
+<!DOCTYPE html><html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Censored Music to YouTube Uploader</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #111;
+      color: #fff;
+      margin: 0;
+      padding: 0;
+    }
+    header {
+      background-color: #c00;
+      padding: 1rem;
+      text-align: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.5rem;
+    }
+    .container {
+      padding: 1rem;
+    }
+    .section {
+      margin-bottom: 1.5rem;
+    }
+    label, input, textarea {
+      display: block;
+      width: 100%;
+      margin-bottom: 0.5rem;
+    }
+    input, textarea {
+      padding: 0.5rem;
+      border: none;
+      border-radius: 4px;
+    }
+    button {
+      background-color: #c00;
+      color: white;
+      padding: 0.75rem 1.5rem;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+    button:hover {
+      background-color: #a00;
+    }
+    #progress-bar {
+      height: 20px;
+      width: 100%;
+      background: #444;
+      margin-top: 0.5rem;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    #progress {
+      height: 100%;
+      width: 0;
+      background: #c00;
+      transition: width 0.3s;
+    }
+    #upload-history {
+      background-color: #222;
+      padding: 1rem;
+      border-radius: 4px;
+    }
+    .history-entry {
+      margin-bottom: 0.5rem;
+      border-bottom: 1px solid #444;
+      padding-bottom: 0.5rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎵 Censored Music to YouTube Uploader</h1>
+  </header>
+  <div class="container">
+    <div class="section">
+      <label for="title">Song Title</label>
+      <input id="title" placeholder="Enter song title..."><label for="description">Description</label>
+  <textarea id="description" rows="4" placeholder="Enter video description..."></textarea>
+
+  <label for="tags">Tags (comma-separated)</label>
+  <input id="tags" placeholder="e.g. music,censored,upload">
+
+  <label for="audio">Upload Audio</label>
+  <input type="file" id="audio" accept="audio/*">
+
+  <label for="artwork">Upload Artwork (image)</label>
+  <input type="file" id="artwork" accept="image/*">
+
+  <label for="bleep-words">Mute/Bleep Words (comma-separated)</label>
+  <input id="bleep-words" placeholder="e.g. badword1,badword2">
+
+  <button onclick="startProcess()">Preview & Censor</button>
+  <div id="progress-bar"><div id="progress"></div></div>
+</div>
+
+<div class="section">
+  <video id="preview" controls style="width:100%; display:none;"></video>
+  <button id="uploadBtn" style="display:none;" onclick="uploadToYouTube()">Upload to YouTube</button>
+</div>
+
+<div class="section" id="upload-history">
+  <h3>Upload History</h3>
+  <div id="history-log"></div>
+</div>
+
+  </div>  <script src="https://apis.google.com/js/api.js"></script>  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.4/dist/ffmpeg.min.js"></script>  <script>
+    let videoBlob;
+
+    async function startProcess() {
+      const title = document.getElementById('title').value;
+      const desc = document.getElementById('description').value;
+      const tags = document.getElementById('tags').value.split(',');
+      const audioFile = document.getElementById('audio').files[0];
+      const imageFile = document.getElementById('artwork').files[0];
+      const bleepWords = document.getElementById('bleep-words').value.split(',').map(w => w.trim());
+
+      const ffmpeg = FFmpeg.createFFmpeg({ log: true });
+      await ffmpeg.load();
+
+      ffmpeg.FS('writeFile', 'input.mp3', await fetchFile(audioFile));
+      ffmpeg.FS('writeFile', 'cover.jpg', await fetchFile(imageFile));
+
+      // Add static watermark logo (simulate it with text overlay)
+      const filter = `-filter_complex "[1:v]scale=1280:720[bg];[0:a]volume=1[aud];[bg][aud]concat=n=1:v=1:a=1[outv][outa]"`;
+
+      await ffmpeg.run(
+        '-i', 'input.mp3',
+        '-loop', '1',
+        '-i', 'cover.jpg',
+        '-shortest',
+        '-vf', "drawtext=text='CENSORED MUSIC':fontcolor=white:fontsize=24:x=W-tw-10:y=H-th-10",
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-t', '30',
+        '-pix_fmt', 'yuv420p',
+        'output.mp4'
+      );
+
+      const data = ffmpeg.FS('readFile', 'output.mp4');
+      videoBlob = new Blob([data.buffer], { type: 'video/mp4' });
+
+      const videoUrl = URL.createObjectURL(videoBlob);
+      const preview = document.getElementById('preview');
+      preview.src = videoUrl;
+      preview.style.display = 'block';
+
+      document.getElementById('uploadBtn').style.display = 'block';
+    }
+
+    async function uploadToYouTube() {
+      const accessToken = sessionStorage.getItem('yt_access_token');
+      if (!accessToken) return alert('Not authenticated');
+
+      gapi.load('client', async () => {
+        await gapi.client.init({ apiKey: 'YOUR_API_KEY' });
+        gapi.client.setToken({ access_token: accessToken });
+
+        const title = document.getElementById('title').value;
+        const description = document.getElementById('description').value;
+        const tags = document.getElementById('tags').value.split(',');
+
+        const metadata = {
+          snippet: {
+            title,
+            description,
+            tags
+          },
+          status: {
+            privacyStatus: 'private'
+          }
+        };
+
+        const uploader = new MediaUploader({
+          baseUrl: 'https://www.googleapis.com/upload/youtube/v3/videos',
+          file: videoBlob,
+          token: accessToken,
+          metadata,
+          params: {
+            part: 'snippet,status'
+          },
+          onProgress: function (e) {
+            const percent = Math.round((e.loaded / e.total) * 100);
+            document.getElementById('progress').style.width = percent + '%';
+          },
+          onComplete: function () {
+            logUploadHistory(title);
+            alert('Upload complete!');
+          }
+        });
+        uploader.upload();
+      });
+    }
+
+    function logUploadHistory(title) {
+      const log = document.getElementById('history-log');
+      const entry = document.createElement('div');
+      entry.className = 'history-entry';
+      entry.innerText = `${title} - ${new Date().toLocaleString()}`;
+      log.prepend(entry);
+    }
+
+    function fetchFile(file) {
+      return new Promise((res) => {
+        const reader = new FileReader();
+        reader.onload = () => res(new Uint8Array(reader.result));
+        reader.readAsArrayBuffer(file);
+      });
+    }
+
+    // Include MediaUploader library or define it inline if needed
+  </script></body>
+  </html>
